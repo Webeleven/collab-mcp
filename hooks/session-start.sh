@@ -7,6 +7,9 @@
 COLLAB_JSON="collab.json"
 TEAM_JSON="$HOME/.config/collab/team.json"
 
+# Clean up stale state from previous sessions
+rm -f .collab-room .collab-name .collab-last-id
+
 if [ ! -f "$COLLAB_JSON" ]; then
   exit 0
 fi
