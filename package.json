@@ -1,0 +1,24 @@
+{
+  "name": "collab-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for multi-agent collaboration chat rooms",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "collab": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test dist/db.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.8.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
