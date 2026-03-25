@@ -77,13 +77,21 @@ The `PostToolUse` hook runs after **every tool call** the agent makes. It calls 
 
 **Result:** The agent receives messages automatically while working, with no manual polling.
 
-### 2. SessionStart hook (agent identity + team context)
+### 2. UserPromptSubmit hook (idle agent notification)
+
+The `PostToolUse` hook only fires when the agent is actively working (making tool calls). When the agent is idle at the prompt, the `UserPromptSubmit` hook fills the gap — it checks for new messages every time the user types something.
+
+**Result:** Even if the agent is idle, any user input triggers a message check.
+
+### 3. SessionStart hook (agent identity + team context)
 
 The `SessionStart` hook reads `collab.json` from the project root and `team.json` from `~/.config/collab/`, then injects the full agent identity, team context, and collaboration instructions at session start.
 
+It also **cleans up stale state files** (`.collab-room`, `.collab-name`, `.collab-last-id`) from previous sessions, so the agent starts fresh.
+
 This replaces the need for collab-related sections in `CLAUDE.md` — everything is injected dynamically.
 
-### 3. Manual check
+### 4. Manual check
 
 At any time, tell the agent:
 
@@ -101,7 +109,7 @@ At any time, tell the agent:
 6. Claude Code injects the output into the agent's context
 7. Agent sees the messages and reacts
 
-**State files** maintained by the agent in the workspace:
+**State files** maintained by the agent in the workspace (cleaned automatically on session start):
 
 | File | Content | Example |
 |------|---------|---------|
@@ -110,6 +118,8 @@ At any time, tell the agent:
 | `.collab-last-id` | Last read message ID | `42` |
 
 > **Note:** Do not use a `Stop` hook — it causes an infinite loop (agent tries to stop → hook blocks → agent tries to stop → ...).
+>
+> **Note:** Do not use `exit 2` in `UserPromptSubmit` hooks — it blocks the user's prompt entirely instead of adding context.
 
 ## Agent/IDE configuration
 
@@ -349,6 +359,17 @@ The agent calls `get_messages(room_id: "aba-80", since_id: 3)` and receives only
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/collab-mcp/hooks/user-prompt.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
@@ -357,11 +378,12 @@ The agent calls `get_messages(room_id: "aba-80", since_id: 3)` and receives only
 ### 4. Add to `.gitignore`
 
 ```
-collab.json
 .collab-room
 .collab-name
 .collab-last-id
 ```
+
+> `collab.json` should be committed — it's project config, not user state.
 
 ### 5. (Optional) Add minimal context to `CLAUDE.md`
 
@@ -425,8 +447,9 @@ src/
 └── db.test.ts      — Unit tests (node:test)
 
 hooks/
-├── session-start.sh  — Reads collab.json + team.json, injects context via additionalContext
-└── post-tool-use.sh  — Checks for new messages, injects via additionalContext
+├── session-start.sh  — Reads collab.json + team.json, injects context, cleans stale state
+├── post-tool-use.sh  — Checks for new messages during active work (additionalContext)
+└── user-prompt.sh    — Checks for new messages on user input (idle agent notification)
 
 ~/.config/collab/
 ├── collab.db         — SQLite with rooms, participants, messages
