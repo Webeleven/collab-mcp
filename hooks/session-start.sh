@@ -77,7 +77,14 @@ context = f"""{team_section}
 ## Collab Room — Comunicação entre agentes
 
 Você tem acesso a um sistema de chat entre agentes via MCP (collab).
-Tools disponíveis: create_room, join_room, send_message, get_messages, list_rooms, list_participants.
+Tools: create_room, join_room, send_message, get_messages, list_rooms, list_participants.
+
+**Elas podem chegar como deferred** (só o nome, sem schema). Se for o caso,
+carregue TODAS de uma vez antes de usar — uma chamada só, nunca uma por tool:
+`ToolSearch` com
+`select:mcp__collab__join_room,mcp__collab__send_message,mcp__collab__get_messages,mcp__collab__list_rooms`
+Chamar uma tool deferred sem carregar dá `InputValidationError`. Isso **não**
+significa que você não tem a ferramenta — significa que falta carregar.
 
 ### Seu perfil
 - **Nome:** `{name}` (use em join_room e sender)
@@ -94,6 +101,8 @@ Quando o usuário disser algo como "join room X" ou "estamos no room X":
    - echo "ROOM_ID" > .collab-room
    - echo "{name}" > .collab-name
    - Após cada get_messages, atualize: echo "LAST_MSG_ID" > .collab-last-id
+5. **Pingue quem abriu a sala** avisando que você assumiu (ver "Ping
+   direto"). Ele pode estar parado e não ver sua entrada.
 
 ### Quando comunicar (send_message)
 Envie mensagem proativamente quando:
@@ -103,6 +112,38 @@ Envie mensagem proativamente quando:
 - Completar sua tarefa (informe @all)
 
 Formato: use @nome pra direcionar. Seja objetivo — inclua nomes de endpoints, campos, tipos, branches.
+
+### Ping direto (SendMessage) — acorda quem a sala não acorda
+
+A sala **registra**; o ping **entrega**. Um agente parado NÃO lê a sala
+sozinho, e um agente ocupado só lê quando lembra. Se a sua mensagem precisa
+de ação, poste na sala **e** pingue.
+
+`ListAgents` lista as sessões vivas. Para pingar:
+`SendMessage({{to: "<nome> [ref]", message: "..."}})`
+
+`SendMessage` também costuma vir deferred — carregue com `ToolSearch`
+`select:SendMessage` antes da primeira chamada. Se der
+`InputValidationError`, é isso: carregue e repita. Não conclua que o ping
+é indisponível.
+
+O **`[ref]` entre colchetes é obrigatório na primeira chamada** — só o nome
+é recusado, e o próprio erro devolve o ref certo para reenviar na hora.
+
+1. **Não sabe quem pingar? Pingue mesmo assim.** Escolha o candidato mais
+   provável (o nome da sessão costuma carregar o repo ou a worktree) e abra
+   se identificando: "sou o `{name}`, trabalhando em <contexto>; se você não
+   é <alvo>, ignora e me avisa". Um ping errado custa uma linha lida; travar
+   esperando o @andre custa a sessão inteira.
+   **NUNCA pare para perguntar "qual agente eu pingo?".**
+2. **Recebeu um ping? Guarde o `from=`.** É o endereço de retorno e a única
+   forma garantida de contato — o nome do peer desaparece do `ListAgents`
+   assim que a sessão dele termina, mas o `from=` continua respondendo.
+3. **Ao responder na sala, pingue de volta.** Quem te perguntou pode estar
+   parado esperando, e não vai ver a resposta sozinho.
+4. O que exige resposta vai **na sala e no ping**. O ping morre com a
+   sessão; a sala sobrevive — é nela que o próximo agente vai ler o que
+   ficou decidido.
 
 ### Notificações automáticas
 Um hook PostToolUse verifica mensagens novas automaticamente após cada tool call.
@@ -114,9 +155,10 @@ Quando receber uma notificação:
 
 ### Aguardando resposta
 Quando enviar uma mensagem que precisa de resposta, NÃO pare e NÃO pergunte ao usuário.
-1. Continue trabalhando em outra parte da tarefa — o hook detecta respostas automaticamente
-2. Se não tiver mais nada pra fazer, faça polling: get_messages com since_id a cada ~30s
-3. Quando a resposta chegar, atualize .collab-last-id e prossiga
+1. **Pingue o alvo** (ver "Ping direto") — sem isso ele pode nunca ler a sala
+2. Continue trabalhando em outra parte da tarefa — o hook detecta respostas automaticamente
+3. Se não tiver mais nada pra fazer, faça polling: get_messages com since_id a cada ~30s
+4. Quando a resposta chegar, atualize .collab-last-id e prossiga
 
 Você é autônomo. O supervisor monitora a sala mas não é intermediário. Interaja direto com os outros agentes. Só envolva @andre quando precisar de decisão de produto/negócio."""
 
