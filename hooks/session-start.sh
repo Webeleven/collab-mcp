@@ -7,8 +7,12 @@
 COLLAB_JSON="collab.json"
 TEAM_JSON="$HOME/.config/collab/team.json"
 
-# Clean up stale state from previous sessions
-rm -f .collab-room .collab-name .collab-last-id
+# Clean up stale state from this pane's previous session. Never touch another
+# pane's files: agents sharing a repository share its working directory.
+COLLAB_PANE=$(printf '%s' "${HERDR_PANE_ID:-solo}" | tr -c 'a-zA-Z0-9_-' '-')
+export COLLAB_PANE
+rm -f ".collab-room-$COLLAB_PANE" ".collab-name-$COLLAB_PANE" \
+      ".collab-last-id-$COLLAB_PANE" ".collab-herdr-$COLLAB_PANE"
 
 if [ ! -f "$COLLAB_JSON" ]; then
   exit 0
@@ -73,6 +77,13 @@ except Exception:
 peers_str = ", ".join(f"@{p}" for p in peers)
 communicate_lines = "\n".join(f"- {item}" for item in communicate_when)
 
+# State files are per pane: agents sharing a repository share its directory.
+pane = os.environ.get("COLLAB_PANE", "solo")
+room_file = f".collab-room-{pane}"
+name_file = f".collab-name-{pane}"
+last_id_file = f".collab-last-id-{pane}"
+herdr_file = f".collab-herdr-{pane}"
+
 context = f"""{team_section}
 ## Collab Room — Comunicação entre agentes
 
@@ -97,12 +108,12 @@ Quando o usuário disser algo como "join room X" ou "estamos no room X":
 1. Chame join_room(room_id, "{name}")
 2. Chame get_messages(room_id) pra ler o contexto existente
 3. Se houver mensagens com @{name} ou @all, responda/aja conforme necessário
-4. Crie os arquivos de estado:
-   - echo "ROOM_ID" > .collab-room
-   - echo "{name}" > .collab-name
-   - Após cada get_messages, atualize: echo "LAST_MSG_ID" > .collab-last-id
-5. **Pingue quem abriu a sala** avisando que você assumiu (ver "Ping
-   direto"). Ele pode estar parado e não ver sua entrada.
+4. Crie os arquivos de estado — os nomes abaixo são os **seus**, com o sufixo
+   do seu pane, e outro agente no mesmo repo usa os dele:
+   - echo "ROOM_ID" > {room_file}
+   - echo "{name}" > {name_file}
+   - Após cada get_messages, atualize: echo "LAST_MSG_ID" > {last_id_file}
+5. **Acorde quem abriu a sala** (skill `peer-notify`) avisando que assumiu.
 
 ### Quando comunicar (send_message)
 Envie mensagem proativamente quando:
@@ -113,52 +124,56 @@ Envie mensagem proativamente quando:
 
 Formato: use @nome pra direcionar. Seja objetivo — inclua nomes de endpoints, campos, tipos, branches.
 
-### Ping direto (SendMessage) — acorda quem a sala não acorda
+### Entrega entre plataformas
 
-A sala **registra**; o ping **entrega**. Um agente parado NÃO lê a sala
-sozinho, e um agente ocupado só lê quando lembra. Se a sua mensagem precisa
-de ação, poste na sala **e** pingue.
+A sala **registra**; um wake só chama a atenção de uma sessão viva. Quando uma
+mensagem precisa de ação rápida ou resposta, poste o conteúdo completo na sala
+e siga o skill `peer-notify`.
 
-`ListAgents` lista as sessões vivas. Para pingar:
-`SendMessage({{to: "<nome> [ref]", message: "..."}})`
+**Seu endereço é reivindicado sozinho.** Vários agentes da mesma plataforma
+podem estar no mesmo repo, então papel e `cwd` não identificam ninguém — o room
+id é o que o par/trio compartilha. Depois que você gravar `{room_file}` e
+`{name_file}`, o hook PostToolUse registra `{name}-<room>` no Herdr e guarda o
+resultado em `{herdr_file}`. Se o arquivo continuar ausente e `HERDR_ENV=1`,
+registre você mesmo: `herdr agent rename "$HERDR_PANE_ID" "{name}-<room>"` e
+grave o nome em `{herdr_file}`. Leia esse arquivo e anuncie o nome na sua
+primeira mensagem da sala; peers sem Herdr precisam lê-lo.
 
-`SendMessage` também costuma vir deferred — carregue com `ToolSearch`
-`select:SendMessage` antes da primeira chamada. Se der
-`InputValidationError`, é isso: carregue e repita. Não conclua que o ping
-é indisponível.
+Se o conteúdo começar com `taken:`, outro agente já ocupa esse papel nesta sala.
+Diga isso na sala em vez de assumir que você está endereçável.
 
-O **`[ref]` entre colchetes é obrigatório na primeira chamada** — só o nome
-é recusado, e o próprio erro devolve o ref certo para reenviar na hora.
+O protocolo resolve primeiro a plataforma do **destinatário**, não as
+ferramentas disponíveis no remetente:
 
-1. **Não sabe quem pingar? Pingue mesmo assim.** Escolha o candidato mais
-   provável (o nome da sessão costuma carregar o repo ou a worktree) e abra
-   se identificando: "sou o `{name}`, trabalhando em <contexto>; se você não
-   é <alvo>, ignora e me avisa". Um ping errado custa uma linha lida; travar
-   esperando o @andre custa a sessão inteira.
-   **NUNCA pare para perguntar "qual agente eu pingo?".**
-2. **Recebeu um ping? Guarde o `from=`.** É o endereço de retorno e a única
-   forma garantida de contato — o nome do peer desaparece do `ListAgents`
-   assim que a sessão dele termina, mas o `from=` continua respondendo.
-3. **Ao responder na sala, pingue de volta.** Quem te perguntou pode estar
-   parado esperando, e não vai ver a resposta sozinho.
-4. O que exige resposta vai **na sala e no ping**. O ping morre com a
-   sessão; a sala sobrevive — é nela que o próximo agente vai ler o que
-   ficou decidido.
+1. Um alvo nomeado por quem pediu vence qualquer inferência. Senão, procura o
+   nome `<papel>-<room>` no Herdr e só então cai para repo e worktree.
+2. Se o alvo for Claude e `SendMessage`/`ListAgents` existirem, usa o canal
+   nativo correlacionado à mesma sessão.
+3. Para Cursor, Codex, ou Claude sem canal nativo, usa
+   `herdr agent prompt <nome>` somente quando o alvo estiver `idle` ou `done`.
+   Se estiver `working`/`blocked`/`unknown`, a sala já tem a mensagem — não acorde.
+4. Com mais de um candidato, lista nome, plataforma, pane e status, e pergunta
+   uma vez. Nunca acorda vários candidatos nem chuta.
+
+Envie no máximo um wake. A resposta também vai primeiro para a sala e usa o
+mesmo protocolo no caminho de volta. Wakes morrem com a sessão; a sala é o
+registro que o próximo agente vai ler.
 
 ### Notificações automáticas
 Um hook PostToolUse verifica mensagens novas automaticamente após cada tool call.
 Se houver mensagens com @{name} ou @all, o conteúdo é injetado no seu contexto.
 Quando receber uma notificação:
 1. Aja conforme necessário
-2. Atualize .collab-last-id: echo "ID" > .collab-last-id
+2. Atualize seu cursor: echo "ID" > {last_id_file}
 3. Se pedirem algo, responda via send_message
 
 ### Aguardando resposta
-Quando enviar uma mensagem que precisa de resposta, NÃO pare e NÃO pergunte ao usuário.
-1. **Pingue o alvo** (ver "Ping direto") — sem isso ele pode nunca ler a sala
-2. Continue trabalhando em outra parte da tarefa — o hook detecta respostas automaticamente
-3. Se não tiver mais nada pra fazer, faça polling: get_messages com since_id a cada ~30s
-4. Quando a resposta chegar, atualize .collab-last-id e prossiga
+1. **Acorde o alvo** (skill `peer-notify`) — sem isso ele pode nunca ler a sala
+2. Se ainda houver trabalho independente, continue. O hook injeta respostas novas
+3. Se a próxima ação depende da resposta, **encerre o turno**. Não rode
+   `collab watch` e não faça polling de `get_messages`. Encerrar é o que te
+   deixa `idle`, e só `idle`/`done` recebem wake Herdr
+4. Quando a resposta chegar (wake ou hook), atualize {last_id_file} e prossiga
 
 Você é autônomo. O supervisor monitora a sala mas não é intermediário. Interaja direto com os outros agentes. Só envolva @andre quando precisar de decisão de produto/negócio."""
 

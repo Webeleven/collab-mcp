@@ -87,7 +87,7 @@ The `PostToolUse` hook only fires when the agent is actively working (making too
 
 The `SessionStart` hook reads `collab.json` from the project root and `team.json` from `~/.config/collab/`, then injects the full agent identity, team context, and collaboration instructions at session start.
 
-It also **cleans up stale state files** (`.collab-room`, `.collab-name`, `.collab-last-id`) from previous sessions, so the agent starts fresh.
+It also **cleans up stale state files** from this pane's previous session, so the agent starts fresh. It never touches another pane's files: agents sharing a repository share its working directory.
 
 This replaces the need for collab-related sections in `CLAUDE.md` — everything is injected dynamically.
 
@@ -99,11 +99,31 @@ At any time, tell the agent:
 > Check messages in room aba-80
 ```
 
+### 5. Cross-platform wake
+
+Collab is the durable record; waking a live peer is a separate delivery step.
+The PostToolUse hook registers the Herdr address `<role>-<room>` once an agent
+joins a room, recording the outcome in `.collab-herdr-<pane>`, since several
+agents of the same platform can share a repository and the room id is the only
+handle a pair or trio has in common. Consumer repos use a
+`peer-notify` skill that resolves the recipient by that address — falling back
+to repo and worktree — before choosing one transport:
+
+1. Native `SendMessage` for a resolved Claude Code recipient.
+2. `herdr agent prompt` for a resolved idle/done Cursor, Codex, or Claude
+   recipient when native delivery is unavailable.
+3. Collab-only when no unique safe live target exists, after listing the
+   candidates so a human can disambiguate.
+
+Transport selection follows the recipient's platform, not whichever tools the
+sender happens to expose. The full message stays in the room; the wake contains
+only the room and message id.
+
 ### How it works internally
 
 1. Agent makes any tool call (e.g., `Edit` a file)
 2. Hook runs `collab check <room> <name> <last_id>` (~50ms)
-3. If `.collab-room` doesn't exist → hook passes silently (exit 0)
+3. If this pane has no `.collab-room-<pane>` → hook passes silently (exit 0)
 4. If no new messages → hook passes silently (exit 0)
 5. If there are messages with `@name` or `@all` → returns `additionalContext` with content
 6. Claude Code injects the output into the agent's context
@@ -113,9 +133,10 @@ At any time, tell the agent:
 
 | File | Content | Example |
 |------|---------|---------|
-| `.collab-room` | Active room ID | `aba-80` |
-| `.collab-name` | Participant name | `backend` |
-| `.collab-last-id` | Last read message ID | `42` |
+| `.collab-room-<pane>` | Active room ID | `aba-80` |
+| `.collab-name-<pane>` | Participant name | `backend` |
+| `.collab-last-id-<pane>` | Last read message ID | `42` |
+| `.collab-herdr-<pane>` | Claimed Herdr address | `backend-aba-80` |
 
 > **Note:** Do not use a `Stop` hook — it causes an infinite loop (agent tries to stop → hook blocks → agent tries to stop → ...).
 >
@@ -378,9 +399,7 @@ The agent calls `get_messages(room_id: "aba-80", since_id: 3)` and receives only
 ### 4. Add to `.gitignore`
 
 ```
-.collab-room
-.collab-name
-.collab-last-id
+.collab-*
 ```
 
 > `collab.json` should be committed — it's project config, not user state.
@@ -464,6 +483,9 @@ hooks/
 
 ## Known limitations
 
-- **No native push:** Agents don't receive real-time notifications. They use `PostToolUse` hooks for near-real-time delivery while actively working, and polling (`get_messages` + `since_id`) when idle.
+- **No universal push:** Hooks provide near-real-time delivery while an agent is
+  active. `peer-notify` can wake a uniquely resolved live Herdr/Claude session,
+  but an offline, ambiguous, or busy non-Claude peer remains collab-only until
+  it resumes or polls.
 - **One process per agent:** Each agent CLI spawns its own Node MCP server process. This is normal and works well thanks to SQLite WAL mode.
 - **No authentication:** Any local process that can execute the server has access to messages. Suitable for local/personal use.
