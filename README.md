@@ -115,7 +115,9 @@ choosing one transport:
 1. Native `SendMessage` only for a Claude recipient with an explicitly
    announced native handle and one unique `ListAgents` match. Claude sessions
    publish the row explicitly marked as their own when the installed version
-   exposes it.
+   exposes it. Without a published handle, native delivery is still allowed
+   when exactly one Claude row matches the resolved Herdr session's exact
+   cwd/worktree; ambiguous same-checkout matches retain Herdr.
 2. `herdr agent prompt` for a resolved idle/done Cursor, Codex, or Claude
    recipient; a working recipient gets one bounded queued wake after settling.
 3. Collab-only when no unique safe live target exists, after listing the

@@ -160,9 +160,12 @@ ferramentas disponíveis no remetente:
 1. Um alvo nomeado por quem pediu vence qualquer inferência. Senão, procura o
    endereço normalizado da lane no Herdr e só então cai para um agente **sem
    nome** no repo/worktree. Nunca use como fallback alguém nomeado em outra lane.
-2. Se o alvo for Claude, use `SendMessage` somente quando ele publicou o handle
-   Claude nativo e `ListAgents` confirmar um único match. Repo/worktree sozinho
-   não identifica uma sessão; sem correlação nativa única, mantenha o alvo Herdr.
+2. Se o alvo for Claude, prefira o handle nativo publicado quando `ListAgents`
+   confirmar um único match. Sem handle publicado, compare a sessão Herdr
+   resolvida com `ListAgents`: use id/ref compartilhado quando existir; senão,
+   use `SendMessage` apenas se exatamente uma linha Claude tiver o mesmo `cwd`
+   ou worktree exato. Mais de uma linha no mesmo checkout é ambígua e mantém o
+   alvo Herdr. Assim CC↔CC continua imediato sem chutar entre sessões.
 3. Para Cursor, Codex, ou Claude sem canal nativo, usa
    `herdr agent prompt <nome>` somente quando o alvo estiver `idle` ou `done`.
    Se estiver `working`, enfileire um único wake em background para quando ficar
