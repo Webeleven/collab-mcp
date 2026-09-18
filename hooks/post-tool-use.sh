@@ -3,16 +3,27 @@
 # Checks for unread messages mentioning @name or @all.
 # Returns additionalContext with messages if found. Silent otherwise.
 
-if [ ! -f .collab-room ]; then
-  exit 0
-fi
+. "$(dirname "$0")/_state.sh" || exit 0
 
-ROOM=$(cat .collab-room 2>/dev/null)
-NAME=$(cat .collab-name 2>/dev/null)
-LAST_ID=$(cat .collab-last-id 2>/dev/null || echo 0)
+# Claim the Herdr address <name>-<room> so peers resolve this session by lookup
+# instead of guessing from cwd, which cannot separate two agents in one repo.
+if [ -n "$HERDR_ENV" ] && [ -n "$HERDR_PANE_ID" ] && command -v herdr >/dev/null 2>&1; then
+  ADDRESS=$(collab_herdr_address "$NAME" "$ROOM")
+  CLAIMED=$(cat "$HERDR_FILE" 2>/dev/null)
+  # Record failures too: the name is globally unique, so a peer already holding
+  # this role in this room is a real conflict, not something to retry forever.
+  if [ "$CLAIMED" != "$ADDRESS" ] && [ "$CLAIMED" != "taken:$ADDRESS" ]; then
+    RENAME_OUTPUT=$(herdr agent rename "$HERDR_PANE_ID" "$ADDRESS" 2>&1)
+    if [ $? -eq 0 ]; then
+      printf '%s' "$ADDRESS" > "$HERDR_FILE"
+    elif printf '%s' "$RENAME_OUTPUT" | python3 -c '
+import sys
 
-if [ -z "$ROOM" ] || [ -z "$NAME" ]; then
-  exit 0
+raise SystemExit(0 if "agent_name_taken" in sys.stdin.read() else 1)
+'; then
+      printf 'taken:%s' "$ADDRESS" > "$HERDR_FILE"
+    fi
+  fi
 fi
 
 # Use collab check — capture stdout only, discard stderr
