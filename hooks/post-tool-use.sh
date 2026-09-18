@@ -13,9 +13,14 @@ if [ -n "$HERDR_ENV" ] && [ -n "$HERDR_PANE_ID" ] && command -v herdr >/dev/null
   # Record failures too: the name is globally unique, so a peer already holding
   # this role in this room is a real conflict, not something to retry forever.
   if [ "$CLAIMED" != "$ADDRESS" ] && [ "$CLAIMED" != "taken:$ADDRESS" ]; then
-    if herdr agent rename "$HERDR_PANE_ID" "$ADDRESS" >/dev/null 2>&1; then
+    RENAME_OUTPUT=$(herdr agent rename "$HERDR_PANE_ID" "$ADDRESS" 2>&1)
+    if [ $? -eq 0 ]; then
       printf '%s' "$ADDRESS" > "$HERDR_FILE"
-    else
+    elif printf '%s' "$RENAME_OUTPUT" | python3 -c '
+import sys
+
+raise SystemExit(0 if "agent_name_taken" in sys.stdin.read() else 1)
+'; then
       printf 'taken:%s' "$ADDRESS" > "$HERDR_FILE"
     fi
   fi

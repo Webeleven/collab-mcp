@@ -103,15 +103,19 @@ At any time, tell the agent:
 
 Collab is the durable record; waking a live peer is a separate delivery step.
 The PostToolUse hook registers a normalized Herdr address derived from
-`<role>-<room>` once an agent joins a room. Values over 32 characters use a
-stable 8-character SHA-256 suffix instead of plain truncation. The result is
-recorded in `.collab-herdr-<pane>`; pane suffixes are filesystem-safe
-(`wB:p4` becomes `wB-p4`); native Claude sessions use the hook `session_id`,
-with `solo` only as the last fallback. Consumer repos use a `peer-notify` skill
-that resolves the recipient by that address before choosing one transport:
+`<role>-<room>` once an agent joins a room. Every address carries an
+8-character SHA-256 suffix of the original `[role, room]` pair, so distinct
+inputs cannot collapse after normalization. The result is recorded in
+`.collab-herdr-<pane>` when Herdr is available. Pane suffixes likewise combine
+a readable slug with a hash of the original pane id; native Claude sessions use
+the hook `session_id`, with `solo` only as the last fallback. Consumer repos use
+a `peer-notify` skill that resolves the recipient by that address before
+choosing one transport:
 
 1. Native `SendMessage` only for a Claude recipient with an explicitly
-   announced native handle and one unique `ListAgents` match.
+   announced native handle and one unique `ListAgents` match. Claude sessions
+   publish the row explicitly marked as their own when the installed version
+   exposes it.
 2. `herdr agent prompt` for a resolved idle/done Cursor, Codex, or Claude
    recipient; a working recipient gets one bounded queued wake after settling.
 3. Collab-only when no unique safe live target exists, after listing the
@@ -138,7 +142,7 @@ only the room and message id.
 | `.collab-room-<pane>` | Active room ID | `aba-80` |
 | `.collab-name-<pane>` | Participant name | `backend` |
 | `.collab-last-id-<pane>` | Last read message ID | `42` |
-| `.collab-herdr-<pane>` | Claimed Herdr address | `backend-aba-80` |
+| `.collab-herdr-<pane>` | Claimed Herdr address, when available | `backend-aba-80-1a2b3c4d` |
 
 > **Note:** Do not use a `Stop` hook — it causes an infinite loop (agent tries to stop → hook blocks → agent tries to stop → ...).
 >

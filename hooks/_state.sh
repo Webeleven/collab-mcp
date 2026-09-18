@@ -11,15 +11,30 @@
 collab_herdr_address() {
   python3 - "$1" "$2" <<'PY'
 import hashlib
+import json
 import re
 import sys
 
-address = re.sub(r"[^a-z0-9_-]+", "-", f"{sys.argv[1]}-{sys.argv[2]}".lower())
-if not address or not address[0].isalpha():
-    address = f"agent-{address}"
-if len(address) > 32:
-    address = f"{address[:23]}-{hashlib.sha256(address.encode()).hexdigest()[:8]}"
-print(address)
+name, room = sys.argv[1:3]
+slug = re.sub(r"[^a-z0-9_-]+", "-", f"{name}-{room}".lower())
+if not slug or not slug[0].isalpha():
+    slug = f"agent-{slug}"
+identity = json.dumps([name, room], ensure_ascii=False, separators=(",", ":"))
+digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
+print(f"{slug[:23]}-{digest}")
+PY
+}
+
+collab_state_suffix() {
+  python3 - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+identity = sys.argv[1]
+slug = re.sub(r"[^a-z0-9_-]+", "-", identity.lower()) or "state"
+digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
+print(f"{slug[:40]}-{digest}")
 PY
 }
 
@@ -39,7 +54,7 @@ print(value if isinstance(value, str) else "")
 fi
 
 STATE_OWNER=${HERDR_PANE_ID:-${SESSION_ID:-solo}}
-PANE=$(printf '%s' "$STATE_OWNER" | tr -c 'a-zA-Z0-9_-' '-')
+PANE=$(collab_state_suffix "$STATE_OWNER")
 ROOM_FILE=".collab-room-$PANE"
 NAME_FILE=".collab-name-$PANE"
 LAST_ID_FILE=".collab-last-id-$PANE"

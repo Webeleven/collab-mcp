@@ -136,12 +136,20 @@ e siga o skill `peer-notify`.
 podem estar no mesmo repo, então papel e `cwd` não identificam ninguém — o room
 id é o que o par/trio compartilha. Depois que você gravar `{room_file}` e
 `{name_file}`, o hook PostToolUse registra um endereço normalizado no Herdr e
-guarda o resultado em `{herdr_file}`. Leia esse arquivo e anuncie exatamente
-esse nome na sua primeira mensagem da sala; peers sem Herdr precisam lê-lo.
-Nomes longos usam os primeiros 23 caracteres + `-` + 8 hex do SHA-256, nunca
-truncamento simples. O sufixo de arquivo também já é seguro: `wB:p4` vira
-`wB-p4`; sem Herdr, Claude usa o `session_id` do hook (`solo` é só o último
-fallback).
+guarda o resultado em `{herdr_file}`.
+
+- Se `{herdr_file}` existir, leia e anuncie exatamente esse endereço.
+- Se Herdr não estiver disponível, não tente ler nem criar esse arquivo;
+  anuncie que esta sessão não tem endereço Herdr.
+- Se `ListAgents` existir, chame uma vez e publique o handle Claude nativo
+  somente quando a saída marcar explicitamente a linha desta própria sessão.
+  Nunca infira sua linha por repo, worktree ou papel. Se não houver linha
+  própria, diga que nenhum handle nativo foi publicado.
+
+O endereço Herdr sempre usa um prefixo legível de 23 caracteres + `-` + 8 hex
+do SHA-256 do par original `[papel, room]`. O sufixo dos arquivos usa slug +
+hash da identidade original do pane ou `session_id`, evitando colisões após a
+normalização; `solo` é apenas o último fallback.
 
 Se o conteúdo começar com `taken:`, outro agente já ocupa esse papel nesta sala.
 Diga isso na sala em vez de assumir que você está endereçável.
