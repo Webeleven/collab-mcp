@@ -8,7 +8,7 @@
 # Claim the Herdr address <name>-<room> so peers resolve this session by lookup
 # instead of guessing from cwd, which cannot separate two agents in one repo.
 if [ -n "$HERDR_ENV" ] && [ -n "$HERDR_PANE_ID" ] && command -v herdr >/dev/null 2>&1; then
-  ADDRESS=$(printf '%s-%s' "$NAME" "$ROOM" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | cut -c1-32)
+  ADDRESS=$(collab_herdr_address "$NAME" "$ROOM")
   CLAIMED=$(cat "$HERDR_FILE" 2>/dev/null)
   # Record failures too: the name is globally unique, so a peer already holding
   # this role in this room is a real conflict, not something to retry forever.

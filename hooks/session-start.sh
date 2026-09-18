@@ -7,9 +7,11 @@
 COLLAB_JSON="collab.json"
 TEAM_JSON="$HOME/.config/collab/team.json"
 
-# Clean up stale state from this pane's previous session. Never touch another
-# pane's files: agents sharing a repository share its working directory.
-COLLAB_PANE=$(printf '%s' "${HERDR_PANE_ID:-solo}" | tr -c 'a-zA-Z0-9_-' '-')
+# Resolve this Herdr pane or native Claude session before cleaning state.
+# _state.sh may return non-zero because SessionStart has no room yet; PANE is
+# still initialized.
+. "$(dirname "$0")/_state.sh" || true
+COLLAB_PANE=$PANE
 export COLLAB_PANE
 rm -f ".collab-room-$COLLAB_PANE" ".collab-name-$COLLAB_PANE" \
       ".collab-last-id-$COLLAB_PANE" ".collab-herdr-$COLLAB_PANE"
@@ -133,11 +135,13 @@ e siga o skill `peer-notify`.
 **Seu endereço é reivindicado sozinho.** Vários agentes da mesma plataforma
 podem estar no mesmo repo, então papel e `cwd` não identificam ninguém — o room
 id é o que o par/trio compartilha. Depois que você gravar `{room_file}` e
-`{name_file}`, o hook PostToolUse registra `{name}-<room>` no Herdr e guarda o
-resultado em `{herdr_file}`. Se o arquivo continuar ausente e `HERDR_ENV=1`,
-registre você mesmo: `herdr agent rename "$HERDR_PANE_ID" "{name}-<room>"` e
-grave o nome em `{herdr_file}`. Leia esse arquivo e anuncie o nome na sua
-primeira mensagem da sala; peers sem Herdr precisam lê-lo.
+`{name_file}`, o hook PostToolUse registra um endereço normalizado no Herdr e
+guarda o resultado em `{herdr_file}`. Leia esse arquivo e anuncie exatamente
+esse nome na sua primeira mensagem da sala; peers sem Herdr precisam lê-lo.
+Nomes longos usam os primeiros 23 caracteres + `-` + 8 hex do SHA-256, nunca
+truncamento simples. O sufixo de arquivo também já é seguro: `wB:p4` vira
+`wB-p4`; sem Herdr, Claude usa o `session_id` do hook (`solo` é só o último
+fallback).
 
 Se o conteúdo começar com `taken:`, outro agente já ocupa esse papel nesta sala.
 Diga isso na sala em vez de assumir que você está endereçável.
@@ -146,12 +150,16 @@ O protocolo resolve primeiro a plataforma do **destinatário**, não as
 ferramentas disponíveis no remetente:
 
 1. Um alvo nomeado por quem pediu vence qualquer inferência. Senão, procura o
-   nome `<papel>-<room>` no Herdr e só então cai para repo e worktree.
-2. Se o alvo for Claude e `SendMessage`/`ListAgents` existirem, usa o canal
-   nativo correlacionado à mesma sessão.
+   endereço normalizado da lane no Herdr e só então cai para um agente **sem
+   nome** no repo/worktree. Nunca use como fallback alguém nomeado em outra lane.
+2. Se o alvo for Claude, use `SendMessage` somente quando ele publicou o handle
+   Claude nativo e `ListAgents` confirmar um único match. Repo/worktree sozinho
+   não identifica uma sessão; sem correlação nativa única, mantenha o alvo Herdr.
 3. Para Cursor, Codex, ou Claude sem canal nativo, usa
    `herdr agent prompt <nome>` somente quando o alvo estiver `idle` ou `done`.
-   Se estiver `working`/`blocked`/`unknown`, a sala já tem a mensagem — não acorde.
+   Se estiver `working`, enfileire um único wake em background para quando ficar
+   `idle`/`done`, com timeout de 30 minutos. Se estiver `blocked`/`unknown`, a
+   sala já tem a mensagem — não acorde.
 4. Com mais de um candidato, lista nome, plataforma, pane e status, e pergunta
    uma vez. Nunca acorda vários candidatos nem chuta.
 

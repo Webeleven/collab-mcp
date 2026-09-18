@@ -102,16 +102,18 @@ At any time, tell the agent:
 ### 5. Cross-platform wake
 
 Collab is the durable record; waking a live peer is a separate delivery step.
-The PostToolUse hook registers the Herdr address `<role>-<room>` once an agent
-joins a room, recording the outcome in `.collab-herdr-<pane>`, since several
-agents of the same platform can share a repository and the room id is the only
-handle a pair or trio has in common. Consumer repos use a
-`peer-notify` skill that resolves the recipient by that address — falling back
-to repo and worktree — before choosing one transport:
+The PostToolUse hook registers a normalized Herdr address derived from
+`<role>-<room>` once an agent joins a room. Values over 32 characters use a
+stable 8-character SHA-256 suffix instead of plain truncation. The result is
+recorded in `.collab-herdr-<pane>`; pane suffixes are filesystem-safe
+(`wB:p4` becomes `wB-p4`); native Claude sessions use the hook `session_id`,
+with `solo` only as the last fallback. Consumer repos use a `peer-notify` skill
+that resolves the recipient by that address before choosing one transport:
 
-1. Native `SendMessage` for a resolved Claude Code recipient.
+1. Native `SendMessage` only for a Claude recipient with an explicitly
+   announced native handle and one unique `ListAgents` match.
 2. `herdr agent prompt` for a resolved idle/done Cursor, Codex, or Claude
-   recipient when native delivery is unavailable.
+   recipient; a working recipient gets one bounded queued wake after settling.
 3. Collab-only when no unique safe live target exists, after listing the
    candidates so a human can disambiguate.
 
