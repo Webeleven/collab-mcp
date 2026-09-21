@@ -62,6 +62,18 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+// WAL hygiene. PASSIVE never blocks readers or writers, so it is the only mode
+// the long-lived server may use; TRUNCATE waits on other connections and is
+// reserved for the manual `collab checkpoint` command.
+export function checkpoint(mode: "PASSIVE" | "TRUNCATE" = "PASSIVE") {
+  const [result] = getDb().pragma(`wal_checkpoint(${mode})`) as Array<{
+    busy: number;
+    log: number;
+    checkpointed: number;
+  }>;
+  return result;
+}
+
 // Room operations
 
 export function createRoom(id: string, description?: string) {
