@@ -5,11 +5,28 @@
 # .collab-* files would let one agent wipe another's room membership and read
 # cursor. Every file is therefore scoped to the pane that owns it.
 #
-# Sets PANE, ROOM_FILE, NAME_FILE, LAST_ID_FILE, HERDR_FILE, and on success
+# Sets COLLAB_PYTHON, PANE, ROOM_FILE, NAME_FILE, LAST_ID_FILE, HERDR_FILE, and on success
 # ROOM, NAME, LAST_ID. Returns non-zero when this pane is not in a room.
 
+# The hooks run on every prompt and tool call, and a python3 that resolves to a
+# version-manager shim costs ~10x the real interpreter. Prefer the system one;
+# on macOS it only works once the developer tools are installed.
+if [ -z "$COLLAB_PYTHON" ]; then
+  COLLAB_PYTHON=python3
+  if [ -x /usr/bin/python3 ]; then
+    case "$OSTYPE" in
+      darwin*)
+        if [ -d /Library/Developer/CommandLineTools ] || [ -d /Applications/Xcode.app ]; then
+          COLLAB_PYTHON=/usr/bin/python3
+        fi
+        ;;
+      *) COLLAB_PYTHON=/usr/bin/python3 ;;
+    esac
+  fi
+fi
+
 collab_herdr_address() {
-  python3 - "$1" "$2" <<'PY'
+  "$COLLAB_PYTHON" - "$1" "$2" <<'PY'
 import hashlib
 import json
 import re
@@ -25,8 +42,16 @@ print(f"{slug[:23]}-{digest}")
 PY
 }
 
+# Runs on every hook, so printable-ASCII identities (pane ids, session uuids)
+# stay in shell: python3 can be a slow shim. Anything else goes through the
+# reference python, because str.lower() maps some non-ASCII characters to
+# ASCII (U+212A KELVIN SIGN -> k) and sed works line by line. The output names
+# the state files and must not change — hooks.test.ts pins it.
 collab_state_suffix() {
-  python3 - "$1" <<'PY'
+  local LC_ALL=C slug digest
+  case "$1" in
+    *[!\ -~]*)
+      "$COLLAB_PYTHON" - "$1" <<'PY'
 import hashlib
 import re
 import sys
@@ -36,12 +61,20 @@ slug = re.sub(r"[^a-z0-9_-]+", "-", identity.lower()) or "state"
 digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
 print(f"{slug[:40]}-{digest}")
 PY
+      return
+      ;;
+  esac
+  slug=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9_-]+/-/g')
+  digest=$(printf '%s' "$1" | shasum -a 256)
+  slug=${slug:-state}
+  printf '%s-%s\n' "${slug:0:40}" "${digest:0:8}"
 }
 
 SESSION_ID=""
 if [ ! -t 0 ]; then
   HOOK_INPUT=$(cat 2>/dev/null)
-  SESSION_ID=$(printf '%s' "$HOOK_INPUT" | python3 -c '
+  # The session id only matters as a fallback owner; skip the parse otherwise.
+  [ -n "$HERDR_PANE_ID" ] || SESSION_ID=$(printf '%s' "$HOOK_INPUT" | "$COLLAB_PYTHON" -c '
 import json
 import sys
 

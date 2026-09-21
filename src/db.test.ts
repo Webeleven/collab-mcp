@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "fs";
+import Database from "better-sqlite3";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -12,6 +13,8 @@ import {
   listParticipants,
   sendMessage,
   getMessages,
+  peekMessages,
+  checkErrorLogPath,
 } from "./db.js";
 
 let tmpDir: string;
@@ -225,5 +228,64 @@ describe("listRooms aggregation", () => {
     assert.equal(rooms.length, 1);
     assert.equal(rooms[0].participant_count, 2);
     assert.equal(rooms[0].message_count, 3);
+  });
+});
+
+describe("peekMessages (collab check read path)", () => {
+  it("reads the same messages as getMessages", () => {
+    const id1 = sendMessage("room-1", "backend", "First");
+    sendMessage("room-1", "audit", "Second");
+
+    assert.deepEqual(peekMessages("room-1"), getMessages("room-1"));
+    assert.deepEqual(
+      peekMessages("room-1", id1 as number),
+      getMessages("room-1", id1 as number)
+    );
+    assert.equal(existsSync(checkErrorLogPath()), false);
+  });
+
+  it("does not create a missing database", () => {
+    const dbPath = join(tmpDir, "test.db");
+
+    assert.deepEqual(peekMessages("room-1", 0, 100), []);
+    assert.equal(existsSync(dbPath), false);
+    assert.match(readFileSync(checkErrorLogPath(), "utf8"), /SQLITE_CANTOPEN/);
+  });
+
+  it("does not create the config directory just to log", () => {
+    const missingDir = join(tmpDir, "never-used");
+    setDbPath(join(missingDir, "test.db"));
+
+    assert.deepEqual(peekMessages("room-1", 0, 100), []);
+    assert.equal(existsSync(missingDir), false);
+  });
+
+  it("returns quickly while a writer holds the database", () => {
+    const dbPath = join(tmpDir, "test.db");
+    sendMessage("room-1", "backend", "Hello");
+    resetDb();
+    setDbPath(dbPath);
+
+    // An exclusive-locking-mode writer shuts out readers even in WAL mode, so
+    // a connection opened with the default 5 s busy timeout would stall here.
+    const writer = new Database(dbPath);
+    try {
+      writer.pragma("locking_mode = EXCLUSIVE");
+      writer.exec("BEGIN EXCLUSIVE");
+      writer
+        .prepare("INSERT INTO rooms (id) VALUES (?)")
+        .run("held-by-writer");
+
+      const started = Date.now();
+      const messages = peekMessages("room-1", 0, 100);
+      const elapsed = Date.now() - started;
+
+      assert.deepEqual(messages, []);
+      assert.ok(elapsed < 1000, `peekMessages took ${elapsed} ms`);
+      assert.match(readFileSync(checkErrorLogPath(), "utf8"), /SQLITE_BUSY/);
+    } finally {
+      writer.exec("ROLLBACK");
+      writer.close();
+    }
   });
 });

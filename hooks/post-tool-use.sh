@@ -16,7 +16,7 @@ if [ -n "$HERDR_ENV" ] && [ -n "$HERDR_PANE_ID" ] && command -v herdr >/dev/null
     RENAME_OUTPUT=$(herdr agent rename "$HERDR_PANE_ID" "$ADDRESS" 2>&1)
     if [ $? -eq 0 ]; then
       printf '%s' "$ADDRESS" > "$HERDR_FILE"
-    elif printf '%s' "$RENAME_OUTPUT" | python3 -c '
+    elif printf '%s' "$RENAME_OUTPUT" | "$COLLAB_PYTHON" -c '
 import sys
 
 raise SystemExit(0 if "agent_name_taken" in sys.stdin.read() else 1)
@@ -36,7 +36,7 @@ if [ $EXIT_CODE -eq 0 ]; then
 fi
 
 # Has messages — return as additionalContext instead of blocking
-CONTEXT_ESCAPED=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+CONTEXT_ESCAPED=$(echo "$OUTPUT" | "$COLLAB_PYTHON" -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
 cat << ENDJSON
 {

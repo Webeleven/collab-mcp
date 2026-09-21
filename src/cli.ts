@@ -5,6 +5,8 @@ import {
   joinRoom,
   sendMessage,
   getMessages,
+  peekMessages,
+  checkpoint,
   listRooms,
   listParticipants,
 } from "./db.js";
@@ -21,6 +23,7 @@ Comandos:
   collab tui <room> [nome]                    Chat interativo (mensagens + input)
   collab watch <room> [--interval <s>]        Monitora mensagens em tempo real (tipo tail -f)
   collab check <room> <name> <since_id>      Checa mensagens novas pra @name (pra hooks)
+  collab checkpoint                          Consolida o WAL no banco (TRUNCATE)
 
 Exemplos:
   collab send aba-80 andre "@backend Adiciona paginação no endpoint de notes"
@@ -175,7 +178,9 @@ switch (command) {
     const sinceId = parseInt(sinceStr, 10);
     if (isNaN(sinceId)) die("since_id precisa ser um número");
 
-    const messages = getMessages(room, sinceId, 100) as Array<{
+    // Read-only and error-free: exit codes other than 0 and 2 would be read by
+    // the hooks as "has messages".
+    const messages = peekMessages(room, sinceId, 100) as Array<{
       id: number;
       sender: string;
       content: string;
@@ -203,6 +208,17 @@ switch (command) {
     process.stdout.write(msg + "\n");
     process.stderr.write(msg + "\n");
     process.exit(2);
+    break;
+  }
+
+  case "checkpoint": {
+    const result = checkpoint("TRUNCATE");
+    if (result.busy) {
+      die(
+        `Checkpoint parcial: ${result.checkpointed}/${result.log} frames (outra conexão segurou o WAL). Tente de novo.`
+      );
+    }
+    console.log(`WAL consolidado (${result.checkpointed} frames).`);
     break;
   }
 
