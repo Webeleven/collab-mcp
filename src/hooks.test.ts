@@ -39,6 +39,10 @@ describe("collab_state_suffix", () => {
     ["ÀÉÎ", "--00c33578"],
     ["日本語pane", "-pane-7d7be904"],
     ["a\\b$c`d", "a-b-c-d-c1affe38"],
+    // str.lower() maps these to ASCII; a byte-wise tr does not.
+    ["pane\u212a", "panek-2892b39d"],
+    ["\u0130stanbul", "i-stanbul-24ec8f72"],
+    ["a\nb", "a-b-7e18f737"],
   ];
 
   for (const [identity, expected] of golden) {

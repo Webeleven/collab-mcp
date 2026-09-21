@@ -42,11 +42,29 @@ print(f"{slug[:23]}-{digest}")
 PY
 }
 
-# Runs on every hook, so it stays in shell: python3 can be a slow shim. The
-# output names the state files and must not change — hooks.test.ts pins it.
+# Runs on every hook, so printable-ASCII identities (pane ids, session uuids)
+# stay in shell: python3 can be a slow shim. Anything else goes through the
+# reference python, because str.lower() maps some non-ASCII characters to
+# ASCII (U+212A KELVIN SIGN -> k) and sed works line by line. The output names
+# the state files and must not change — hooks.test.ts pins it.
 collab_state_suffix() {
-  local slug digest
-  slug=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C sed -E 's/[^a-z0-9_-]+/-/g')
+  local LC_ALL=C slug digest
+  case "$1" in
+    *[!\ -~]*)
+      "$COLLAB_PYTHON" - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+identity = sys.argv[1]
+slug = re.sub(r"[^a-z0-9_-]+", "-", identity.lower()) or "state"
+digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
+print(f"{slug[:40]}-{digest}")
+PY
+      return
+      ;;
+  esac
+  slug=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9_-]+/-/g')
   digest=$(printf '%s' "$1" | shasum -a 256)
   slug=${slug:-state}
   printf '%s-%s\n' "${slug:0:40}" "${digest:0:8}"
