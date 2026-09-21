@@ -5,6 +5,7 @@ import {
   joinRoom,
   sendMessage,
   getMessages,
+  peekMessages,
   listRooms,
   listParticipants,
 } from "./db.js";
@@ -175,7 +176,9 @@ switch (command) {
     const sinceId = parseInt(sinceStr, 10);
     if (isNaN(sinceId)) die("since_id precisa ser um número");
 
-    const messages = getMessages(room, sinceId, 100) as Array<{
+    // Read-only and error-free: exit codes other than 0 and 2 would be read by
+    // the hooks as "has messages".
+    const messages = peekMessages(room, sinceId, 100) as Array<{
       id: number;
       sender: string;
       content: string;

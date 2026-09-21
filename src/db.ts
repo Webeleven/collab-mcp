@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 
@@ -118,12 +118,12 @@ export function sendMessage(roomId: string, sender: string, content: string) {
   return result.lastInsertRowid;
 }
 
-export function getMessages(
+function queryMessages(
+  db: Database.Database,
   roomId: string,
   sinceId?: number,
   limit: number = 50
 ) {
-  const db = getDb();
   if (sinceId) {
     return db
       .prepare(
@@ -145,4 +145,71 @@ export function getMessages(
     )
     .all(roomId, limit)
     .reverse();
+}
+
+export function getMessages(
+  roomId: string,
+  sinceId?: number,
+  limit: number = 50
+) {
+  return queryMessages(getDb(), roomId, sinceId, limit);
+}
+
+// Read path for `collab check`, which runs inside prompt hooks with a hard
+// timeout. It must fail cheap: a read-only connection with a short busy
+// timeout, no journal_mode pragma and no DDL, so it never waits on a lock and
+// never creates the database. Any failure reads as "no messages" — the next
+// hook run retries — but is recorded, because both hooks go through here and
+// a permanent failure would otherwise silence them without a trace.
+const CHECK_LOG_MAX_BYTES = 256 * 1024;
+
+export function checkErrorLogPath() {
+  return join(dirname(_dbPath), "check-errors.log");
+}
+
+function logCheckError(err: unknown) {
+  try {
+    const path = checkErrorLogPath();
+    try {
+      if (statSync(path).size > CHECK_LOG_MAX_BYTES) {
+        renameSync(path, `${path}.1`);
+      }
+    } catch {
+      // no log yet
+    }
+    const code = (err as { code?: string })?.code ?? "ERROR";
+    const message = err instanceof Error ? err.message : String(err);
+    // No mkdir: a missing directory means collab was never used here.
+    appendFileSync(
+      path,
+      `${new Date().toISOString()} pid=${process.pid} ${code} ${message} (${_dbPath})\n`
+    );
+  } catch {
+    // logging must never fail the check
+  }
+}
+
+export function peekMessages(
+  roomId: string,
+  sinceId?: number,
+  limit: number = 50
+) {
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(_dbPath, {
+      readonly: true,
+      fileMustExist: true,
+      timeout: 300,
+    });
+    return queryMessages(db, roomId, sinceId, limit);
+  } catch (err) {
+    logCheckError(err);
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // nothing useful to do in a hook
+    }
+  }
 }
