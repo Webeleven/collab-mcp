@@ -14,7 +14,7 @@ if [ $EXIT_CODE -eq 0 ]; then
 fi
 
 # Has messages — inject via additionalContext (exit 0, never block)
-CONTEXT_ESCAPED=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+CONTEXT_ESCAPED=$(echo "$OUTPUT" | "$COLLAB_PYTHON" -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
 cat << ENDJSON
 {

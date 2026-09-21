@@ -21,7 +21,7 @@ if [ ! -f "$COLLAB_JSON" ]; then
 fi
 
 # Generate full context via python (easier to handle JSON + string building)
-CONTEXT=$(python3 << 'PYEOF'
+CONTEXT=$("$COLLAB_PYTHON" << 'PYEOF'
 import json, os, sys
 
 collab_path = "collab.json"
@@ -204,7 +204,7 @@ if [ -z "$CONTEXT" ]; then
   exit 0
 fi
 
-CONTEXT_ESCAPED=$(echo "$CONTEXT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+CONTEXT_ESCAPED=$(echo "$CONTEXT" | "$COLLAB_PYTHON" -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
 cat << ENDJSON
 {
