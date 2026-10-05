@@ -65,7 +65,8 @@ PY
       ;;
   esac
   slug=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9_-]+/-/g')
-  digest=$(printf '%s' "$1" | { shasum -a 256 2>/dev/null || sha256sum; })
+  digest=$(printf '%s' "$1" | { shasum -a 256 2>/dev/null || sha256sum 2>/dev/null ||
+    "$COLLAB_PYTHON" -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; })
   slug=${slug:-state}
   printf '%s-%s\n' "${slug:0:40}" "${digest:0:8}"
 }
