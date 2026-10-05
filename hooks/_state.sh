@@ -65,7 +65,7 @@ PY
       ;;
   esac
   slug=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9_-]+/-/g')
-  digest=$(printf '%s' "$1" | shasum -a 256)
+  digest=$(printf '%s' "$1" | { shasum -a 256 2>/dev/null || sha256sum; })
   slug=${slug:-state}
   printf '%s-%s\n' "${slug:0:40}" "${digest:0:8}"
 }
