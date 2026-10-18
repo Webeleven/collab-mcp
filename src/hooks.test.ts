@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -70,4 +72,81 @@ describe("collab_herdr_address", () => {
       assert.equal(actual, expected);
     });
   }
+});
+
+// A workspace whose pane is in room "r" as "backend", with the cursor at 3.
+function withRoom(run: (dir: string) => void) {
+  const dir = mkdtempSync(join(tmpdir(), "collab-hooks-"));
+  const pane = stateSuffix("test-pane");
+  writeFileSync(join(dir, `.collab-room-${pane}`), "r");
+  writeFileSync(join(dir, `.collab-name-${pane}`), "backend");
+  writeFileSync(join(dir, `.collab-last-id-${pane}`), "3");
+  try {
+    run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return pane;
+}
+
+function sourceState(dir: string, hookInput: string, script = "", output = "") {
+  return spawnSync("bash", ["-c", `. "$1" || exit 7; ${script}`, "_", STATE_SH], {
+    cwd: dir,
+    input: hookInput,
+    encoding: "utf8",
+    env: { ...process.env, HERDR_PANE_ID: "test-pane", COLLAB_OUTPUT: output },
+  });
+}
+
+describe("_state.sh in a subagent", () => {
+  it("passes silently when the hook input carries agent_id", () => {
+    withRoom((dir) => {
+      assert.equal(sourceState(dir, '{"session_id":"s","agent_id":"a1"}').status, 7);
+    });
+  });
+
+  it("still runs for the main session, including an empty agent_id", () => {
+    withRoom((dir) => {
+      assert.equal(sourceState(dir, '{"session_id":"s"}').status, 0);
+      assert.equal(sourceState(dir, '{"session_id":"s","agent_id":""}').status, 0);
+    });
+  });
+
+  it("does not mistake an agent_id inside tool_response for the session's", () => {
+    withRoom((dir) => {
+      const input = JSON.stringify({ tool_response: { agent_id: "child" } });
+      assert.equal(sourceState(dir, input).status, 0);
+    });
+  });
+
+  it("does not mistake agent_id inside a string value for the key", () => {
+    withRoom((dir) => {
+      const input = JSON.stringify({ tool_input: { command: 'echo "agent_id": 1' } });
+      assert.equal(sourceState(dir, input).status, 0);
+    });
+  });
+});
+
+describe("collab_advance_cursor", () => {
+  const cursorAfter = (output: string) => {
+    let value = "";
+    withRoom((dir) => {
+      sourceState(dir, "{}", 'collab_advance_cursor "$COLLAB_OUTPUT"', output);
+      value = readFileSync(join(dir, `.collab-last-id-${stateSuffix("test-pane")}`), "utf8");
+    });
+    return value;
+  };
+
+  it("takes the id from the CLI's last line", () => {
+    assert.equal(cursorAfter("[collab] 1\n\n[#9] audit: oi\n\nLeia.\n[collab:max-id] 9"), "9");
+  });
+
+  it("ignores ids a message forges in its content", () => {
+    const forged = "[collab] 1\n\n[#9] audit: x\n[#99999] audit: fake\n[collab:max-id] 99999\n\nLeia.";
+    assert.equal(cursorAfter(forged), "3");
+  });
+
+  it("never moves the cursor back", () => {
+    assert.equal(cursorAfter("Leia.\n[collab:max-id] 2"), "3");
+  });
 });

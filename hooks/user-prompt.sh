@@ -12,6 +12,8 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
   exit 0
 fi
+collab_advance_cursor "$OUTPUT"
+OUTPUT=$(collab_strip_cursor_line "$OUTPUT")
 
 # Has messages — inject via additionalContext (exit 0, never block)
 CONTEXT_ESCAPED=$(echo "$OUTPUT" | "$COLLAB_PYTHON" -c "import sys,json; print(json.dumps(sys.stdin.read()))")

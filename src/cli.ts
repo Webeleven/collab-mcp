@@ -205,9 +205,13 @@ switch (command) {
       ...relevant.map((m) => `[#${m.id}] ${m.sender}: ${m.content}\n`),
       "Leia e responda com get_messages/send_message antes de continuar.",
     ].join("\n");
-    process.stdout.write(msg + "\n");
+    // The hooks advance their read cursor from this last line. It is the last
+    // thing printed, so no message content can stand in for it.
+    // Exit only after stdout drains: a pipe write cut short by process.exit
+    // would leave a message line, not this one, at the end.
+    const maxId = Math.max(...relevant.map((m) => m.id));
     process.stderr.write(msg + "\n");
-    process.exit(2);
+    process.stdout.write(msg + "\n" + `[collab:max-id] ${maxId}\n`, () => process.exit(2));
     break;
   }
 

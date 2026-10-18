@@ -71,9 +71,52 @@ PY
   printf '%s-%s\n' "${slug:0:40}" "${digest:0:8}"
 }
 
+# Moves the read cursor past every message `collab check` just printed, so the
+# next hook injects only what is new. The id comes from the CLI's own last line
+# (`[collab:max-id] <id>`), never from message lines, which a sender controls.
+collab_advance_cursor() {
+  local last max
+  last=$(printf '%s\n' "$1" | tail -n 1)
+  case "$last" in
+    "[collab:max-id] "*) max=${last#"[collab:max-id] "} ;;
+    *) return 0 ;;
+  esac
+  case "$max" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$max" -gt "${LAST_ID:-0}" ] && printf '%s' "$max" > "$LAST_ID_FILE"
+  return 0
+}
+
+# Drops the CLI's cursor line before the output reaches the agent.
+collab_strip_cursor_line() {
+  printf '%s\n' "$1" | sed '$ { /^\[collab:max-id\] /d; }'
+}
+
 SESSION_ID=""
+HOOK_INPUT=""
 if [ ! -t 0 ]; then
   HOOK_INPUT=$(cat 2>/dev/null)
+  # A subagent inherits its parent's pane and would read the parent's room, so
+  # every message reached the context twice. Its hook input carries a top-level
+  # agent_id. The cheap substring test skips python on almost every call; a hit
+  # can also be a tool_response field, so python confirms the top-level key.
+  case "$HOOK_INPUT" in
+    *'"agent_id":'*)
+      if printf '%s' "$HOOK_INPUT" | "$COLLAB_PYTHON" -c '
+import json
+import sys
+
+try:
+    raise SystemExit(0 if json.load(sys.stdin).get("agent_id") else 1)
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(1)
+' 2>/dev/null; then
+        COLLAB_SUBAGENT=1
+        return 1
+      fi
+      ;;
+  esac
   # The session id only matters as a fallback owner; skip the parse otherwise.
   [ -n "$HERDR_PANE_ID" ] || SESSION_ID=$(printf '%s' "$HOOK_INPUT" | "$COLLAB_PYTHON" -c '
 import json

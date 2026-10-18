@@ -112,14 +112,14 @@ the hook `session_id`, with `solo` only as the last fallback. Consumer repos use
 a `peer-notify` skill that resolves the recipient by that address before
 choosing one transport:
 
-1. Native `SendMessage` only for a Claude recipient with an explicitly
-   announced native handle and one unique `ListAgents` match. Claude sessions
-   publish the row explicitly marked as their own when the installed version
-   exposes it. Without a published handle, native delivery is still allowed
-   when exactly one Claude row matches the resolved Herdr session's exact
-   cwd/worktree; ambiguous same-checkout matches retain Herdr.
-2. `herdr agent prompt` for a resolved idle/done Cursor, Codex, or Claude
-   recipient; a working recipient gets one bounded queued wake after settling.
+1. Native `SendMessage` for a Claude Code recipient on the same machine. Every
+   Claude session announces on join the row `ListAgents` marks as its own,
+   and the sender wakes that handle. It never types into a terminal.
+2. `herdr agent prompt` only where native delivery cannot reach: a Cursor or
+   Codex recipient, another machine, or a Claude session with no announced
+   handle. A working Cursor or Codex recipient gets one bounded queued wake
+   after settling. A pane with `"focused": true`, the lead's or the user's, is
+   never prompted: a person may be typing there.
 3. Collab-only when no unique safe live target exists, after listing the
    candidates so a human can disambiguate.
 
@@ -133,9 +133,14 @@ only the room and message id.
 2. Hook runs `collab check <room> <name> <last_id>` (~50ms)
 3. If this pane has no `.collab-room-<pane>` → hook passes silently (exit 0)
 4. If no new messages → hook passes silently (exit 0)
-5. If there are messages with `@name` or `@all` → returns `additionalContext` with content
+5. If there are messages with `@name` or `@all` → returns `additionalContext` with content and moves `.collab-last-id-<pane>` past them, so each message is injected once
 6. Claude Code injects the output into the agent's context
 7. Agent sees the messages and reacts
+
+A hook call from a subagent (its input carries `agent_id`) passes silently: the
+subagent inherits its parent's pane and would read the parent's room a second
+time. After a `send_message` that mentions a peer role, the PostToolUse hook
+reminds the sender to wake that peer through `peer-notify`.
 
 **State files** maintained by the agent in the workspace (cleaned automatically on session start):
 
