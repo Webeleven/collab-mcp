@@ -11,6 +11,8 @@ TEAM_JSON="$HOME/.config/collab/team.json"
 # _state.sh may return non-zero because SessionStart has no room yet; PANE is
 # still initialized.
 . "$(dirname "$0")/_state.sh" || true
+# A subagent shares its parent's pane: cleaning here would drop the parent's room.
+[ -z "$COLLAB_SUBAGENT" ] && [ -n "$PANE" ] || exit 0
 COLLAB_PANE=$PANE
 export COLLAB_PANE
 rm -f ".collab-room-$COLLAB_PANE" ".collab-name-$COLLAB_PANE" \
@@ -114,7 +116,7 @@ Quando o usuário disser algo como "join room X" ou "estamos no room X":
    do seu pane, e outro agente no mesmo repo usa os dele:
    - echo "ROOM_ID" > {room_file}
    - echo "{name}" > {name_file}
-   - Após cada get_messages, atualize: echo "LAST_MSG_ID" > {last_id_file}
+   - O cursor {last_id_file} é dos hooks; só grave nele um id maior que o atual
 5. **Acorde quem abriu a sala** (skill `peer-notify`) avisando que assumiu.
 
 ### Quando comunicar (send_message)
@@ -132,19 +134,20 @@ A sala **registra**; um wake só chama a atenção de uma sessão viva. Quando u
 mensagem precisa de ação rápida ou resposta, poste o conteúdo completo na sala
 e siga o skill `peer-notify`.
 
-**Seu endereço é reivindicado sozinho.** Vários agentes da mesma plataforma
-podem estar no mesmo repo, então papel e `cwd` não identificam ninguém — o room
-id é o que o par/trio compartilha. Depois que você gravar `{room_file}` e
-`{name_file}`, o hook PostToolUse registra um endereço normalizado no Herdr e
-guarda o resultado em `{herdr_file}`.
+**Anuncie seus dois endereços na primeira mensagem da sala.** Vários agentes da
+mesma plataforma podem estar no mesmo repo, então papel e `cwd` não identificam
+ninguém — o room id é o que o par/trio compartilha.
 
-- Se `{herdr_file}` existir, leia e anuncie exatamente esse endereço.
-- Se Herdr não estiver disponível, não tente ler nem criar esse arquivo;
-  anuncie que esta sessão não tem endereço Herdr.
-- Se `ListAgents` existir, chame uma vez e publique o handle Claude nativo
-  somente quando a saída marcar explicitamente a linha desta própria sessão.
-  Nunca infira sua linha por repo, worktree ou papel. Se não houver linha
-  própria, diga que nenhum handle nativo foi publicado.
+- **Handle Claude nativo**, o que outro Claude Code usa para te acordar: carregue
+  `ListAgents` e `SendMessage` de uma vez (`ToolSearch` com
+  `select:ListAgents,SendMessage`), chame `ListAgents` e anuncie a linha que ele
+  marca como esta sessão, no formato `Handle Claude nativo: <nome> [<ref>]`.
+  Anuncie de novo depois de retomar a sessão ou de um `/rename`. Só subagente,
+  Cursor ou Codex anunciam que não têm handle nativo.
+- **Endereço Herdr**, para Cursor, Codex e outras máquinas: depois que você
+  gravar `{room_file}` e `{name_file}`, o hook PostToolUse registra um endereço
+  normalizado no Herdr e guarda o resultado em `{herdr_file}`. Leia e anuncie
+  exatamente esse endereço. Sem Herdr, não tente ler nem criar esse arquivo.
 
 O endereço Herdr sempre usa um prefixo legível de 23 caracteres + `-` + 8 hex
 do SHA-256 do par original `[papel, room]`. O sufixo dos arquivos usa slug +
@@ -154,23 +157,21 @@ normalização; `solo` é apenas o último fallback.
 Se o conteúdo começar com `taken:`, outro agente já ocupa esse papel nesta sala.
 Diga isso na sala em vez de assumir que você está endereçável.
 
-O protocolo resolve primeiro a plataforma do **destinatário**, não as
-ferramentas disponíveis no remetente:
+O wake segue a plataforma do **destinatário**, não as ferramentas do remetente:
 
-1. Um alvo nomeado por quem pediu vence qualquer inferência. Senão, procura o
-   endereço normalizado da lane no Herdr e só então cai para um agente **sem
-   nome** no repo/worktree. Nunca use como fallback alguém nomeado em outra lane.
-2. Se o alvo for Claude, prefira o handle nativo publicado quando `ListAgents`
-   confirmar um único match. Sem handle publicado, compare a sessão Herdr
-   resolvida com `ListAgents`: use id/ref compartilhado quando existir; senão,
-   use `SendMessage` apenas se exatamente uma linha Claude tiver o mesmo `cwd`
-   ou worktree exato. Mais de uma linha no mesmo checkout é ambígua e mantém o
-   alvo Herdr. Assim CC↔CC continua imediato sem chutar entre sessões.
-3. Para Cursor, Codex, ou Claude sem canal nativo, usa
-   `herdr agent prompt <nome>` somente quando o alvo estiver `idle` ou `done`.
-   Se estiver `working`, enfileire um único wake em background para quando ficar
-   `idle`/`done`, com timeout de 30 minutos. Se estiver `blocked`/`unknown`, a
-   sala já tem a mensagem — não acorde.
+1. **Claude Code nesta máquina: nativo.** `SendMessage` para o handle que o alvo
+   anunciou na sala ou no kickoff, depois que `ListAgents` mostrar uma única
+   linha com esse nome ou `[ref]`. Alvo `working` serve: a mensagem espera o
+   próximo turno dele. Pane Herdr num brief identifica o agente, não escolhe o
+   transporte.
+2. **Herdr só onde o nativo não alcança:** Cursor, Codex, outra máquina, ou
+   Claude sem handle anunciado. `herdr agent prompt <nome>` com o alvo `idle`
+   ou `done`; Cursor/Codex `working` recebe um único wake em background para
+   quando ficar `idle`/`done`, com timeout de 30 minutos; `blocked`/`unknown`
+   não recebe wake.
+3. **Nunca digite num pane onde uma pessoa pode estar escrevendo:** linha do
+   `herdr agent list` com `"focused": true`, ou alvo de papel `lead` ou `andre`.
+   A sala já tem a mensagem; pule o wake e diga isso.
 4. Com mais de um candidato, lista nome, plataforma, pane e status, e pergunta
    uma vez. Nunca acorda vários candidatos nem chuta.
 
@@ -181,18 +182,18 @@ registro que o próximo agente vai ler.
 ### Notificações automáticas
 Um hook PostToolUse verifica mensagens novas automaticamente após cada tool call.
 Se houver mensagens com @{name} ou @all, o conteúdo é injetado no seu contexto.
+Cada mensagem é injetada uma vez só: o hook avança o cursor em {last_id_file}.
 Quando receber uma notificação:
 1. Aja conforme necessário
-2. Atualize seu cursor: echo "ID" > {last_id_file}
-3. Se pedirem algo, responda via send_message
+2. Se pedirem algo, responda via send_message
 
 ### Aguardando resposta
 1. **Acorde o alvo** (skill `peer-notify`) — sem isso ele pode nunca ler a sala
 2. Se ainda houver trabalho independente, continue. O hook injeta respostas novas
 3. Se a próxima ação depende da resposta, **encerre o turno**. Não rode
-   `collab watch` e não faça polling de `get_messages`. Encerrar é o que te
-   deixa `idle`, e só `idle`/`done` recebem wake Herdr
-4. Quando a resposta chegar (wake ou hook), atualize {last_id_file} e prossiga
+   `collab watch` e não faça polling de `get_messages`. A resposta chega pelo
+   wake nativo, por um wake Herdr quando você estiver `idle`, ou pelo hook
+4. Quando a resposta chegar, prossiga
 
 Você é autônomo. O supervisor monitora a sala mas não é intermediário. Interaja direto com os outros agentes. Só envolva @andre quando precisar de decisão de produto/negócio."""
 
